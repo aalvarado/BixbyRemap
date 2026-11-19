@@ -5,7 +5,7 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
-  
+
 permissions:
   contents: write
 
@@ -16,8 +16,10 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set up Java 17 for android sdk tools
+      - name: Set up Java 17 for Android SDK tools
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -28,16 +30,12 @@ jobs:
         with:
           packages: platform-tools platforms;android-25 build-tools;25.0.2
 
-      - name: Install Android SDK packages
-        run: |
-          sdkmanager "platforms;android-25" "build-tools;25.0.2"
-
-      - name: Set up Java 8 for this legacy Gradle project
+      - name: Set up Java 8 for Gradle
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "8"
-          
+
       - name: Build release APK
         run: |
           chmod +x ./gradlew
@@ -55,9 +53,10 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          APK=$(find app/build/outputs/apk -type f -name '*release*.apk' ! -name '*unaligned*' | head -n 1)
+          APK=$(find app/build/outputs/apk -type f -name '*release*.apk' | head -n 1)
+
           if [ -z "$APK" ]; then
-            echo "Release APK not found. APK files produced:"
+            echo "Release APK not found."
             find app/build/outputs -type f -name '*.apk'
             exit 1
           fi
@@ -70,8 +69,29 @@ jobs:
             --out BixbyRemap.apk \
             "$APK"
 
+      - name: Find latest version tag
+        id: latest_tag
+        run: |
+          git fetch --force --tags
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG=$(git tag --list 'v*' --sort=-version:refname | head -n 1)
+          fi
+
+          if [ -z "$TAG" ]; then
+            echo "No version tag found."
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Using release tag: $TAG"
+
       - name: Create GitHub Release and upload APK
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.latest_tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: BixbyRemap.apk
           generate_release_notes: true
